@@ -1,0 +1,88 @@
+{
+  "format_version": 1,
+  "bpm": 120.0,
+  "time_signature_numerator": 9,
+  "time_signature_denominator": 4,
+  "grid_step": 4,
+  "channels": [
+    {
+      "index": 0,
+      "name": "通道 0",
+      "color": "#4C8BF5",
+      "notes": [
+        {
+          "pitch": 58,
+          "start": 1,
+          "duration": 10
+        },
+        {
+          "pitch": 40,
+          "start": 6,
+          "duration": 1
+        },
+        {
+          "pitch": 43,
+          "start": 3,
+          "duration": 1
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "name": "通道 1",
+      "color": "#E8663D",
+      "notes": [
+        {
+          "pitch": 54,
+          "start": 6,
+          "duration": 1
+        },
+        {
+          "pitch": 47,
+          "start": 17,
+          "duration": 9
+        },
+        {
+          "pitch": 51,
+          "start": 15,
+          "duration": 1
+        },
+        {
+          "pitch": 47,
+          "start": 14,
+          "duration": 1
+        },
+        {
+          "pitch": 46,
+          "start": 23,
+          "duration": 4
+        },
+        {
+          "pitch": 47,
+          "start": 15,
+          "duration": 1
+        },
+        {
+          "pitch": 31,
+          "start": 27,
+          "duration": 1
+        },
+        {
+          "pitch": 49,
+          "start": 15,
+          "duration": 1
+        },
+        {
+          "pitch": 59,
+          "start": 23,
+          "duration": 1
+        },
+        {
+          "pitch": 53,
+          "start": 10,
+          "duration": 1
+        }
+      ]
+    }
+  ]
+}

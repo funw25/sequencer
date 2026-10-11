@@ -1,0 +1,30 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 测试缓存
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 打包产物
+build/
+dist/
+*.spec
+
+# IDE
+.idea/
+.vscode/
+
+# 操作系统
+Thumbs.db
+.DS_Store
+
+# 工作区本地依赖（你 README 里提到的 .pyvendor）
+.pyvendor/
