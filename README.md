@@ -3,7 +3,7 @@
 基于 CH32V 系列 MCU 的模块化合成器系统的 PC 端音序软件骨架。当前版本只做音序编辑与播放事件生成，
 串口消息格式尚未确定，播放事件输出到界面侧栏的事件日志。
 
-## 当前能做什么
+## 当前功能
 
 - 多通道音序编辑，通道可增删改；一个通道对应一个合成器模块或乐器
 - 钢琴卷帘（`QGraphicsView` / `QGraphicsScene`）：显示网格、点击或拖动创建音符、拖动移位、拖右边缘改长度，全部吸附到整数网格
@@ -28,8 +28,7 @@ python -m pytest tests/test_model.py tests/test_timing.py tests/test_playback.py
                                        # 只跑非界面测试，不需要 PySide6
 ```
 
-界面测试在 `QT_QPA_PLATFORM=offscreen` 下运行，不需要显示器。这一点在 `tests/test_ui_smoke.py`
-里用 `os.environ.setdefault` 设置，不依赖 pytest 插件。
+界面测试在 `QT_QPA_PLATFORM=offscreen` 下运行，不需要显示器。这一点在 `tests/test_ui_smoke.py`里用 `os.environ.setdefault` 设置，不依赖 pytest 插件。
 
 如果所在环境的 pytest 无法读取它自己创建的临时目录（本项目的开发环境就是这样），改用：
 
@@ -37,8 +36,7 @@ python -m pytest tests/test_model.py tests/test_timing.py tests/test_playback.py
 python -m pytest -p no:tmpdir -p no:cacheprovider
 ```
 
-`conftest.py` 提供了一个自管的 `tmp_path` 夹具顶替内置插件，测试代码本身不用改，
-两种跑法都能通过。
+`conftest.py` 提供了一个自管的 `tmp_path` 夹具顶替内置插件，测试代码本身不用改，两种跑法都能通过。
 
 ## 目录结构
 
