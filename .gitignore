@@ -28,3 +28,7 @@ Thumbs.db
 
 # 工作区本地依赖（你 README 里提到的 .pyvendor）
 .pyvendor/
+
+# pytest 在本工作区留下的临时目录（目录 ACL 拒绝删除而残留，见《模块化合成器项目进展》仓库核对记录）
+.pytest_tmp*/
+pytest-cache-files-*/
