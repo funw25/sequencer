@@ -14,7 +14,9 @@ _NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 def pitch_name(pitch: int) -> str:
     """把音高编号转成便于核对的音名（仅显示用，硬件映射另定）。"""
-    if not 1 <= pitch <= 127:
+    if pitch <= 0:
+        return "休止"
+    if pitch > 127:
         return "?"
     octave, index = divmod(pitch, 12)
     return f"{_NOTE_NAMES[index]}{octave}"
@@ -38,11 +40,17 @@ class DebugOutput(OutputAdapter):
         self._emit(self.format_event(event))
 
     def format_event(self, event) -> str:
-        """把事件格式化成人能读的一行。"""
+        """把事件格式化成人能读的一行。
+
+        格式示例：``  1.250s  开始  通道 2-62音``
+
+        通道号使用数据下标，从 0 开始。界面上的通道列表显示为 1、2、3，
+        两处相差 1，核对时以此处的下标为准。
+        """
         kind = "开始" if event.kind == EVENT_NOTE_ON else "结束"
         text = (
-            f"{event.time_seconds:8.3f}s  {kind}  通道 {event.channel_index}"
-            f"  音高 {event.pitch}"
+            f"{event.time_seconds:8.3f}s  {kind}"
+            f"  通道 {event.channel_index}-{event.pitch}音"
         )
         if self.show_pitch_name:
             text += f"（{pitch_name(event.pitch)}）"

@@ -96,8 +96,7 @@ def test_play_writes_events_into_log(window):
     window.play()
     text = window.log_view.toPlainText()
     assert "开始" in text
-    assert "通道 0" in text
-    assert "音高 60" in text
+    assert "通道 0-60音" in text
     window.stop()
     assert window.piano_roll._playhead_step == 0
 

@@ -35,7 +35,12 @@ from ..core.playback import PlaybackEngine
 from ..io.project_io import ProjectIOError, load_project, save_project
 from ..model.project import ALLOWED_GRID_STEPS, Project
 from ..output.debug_output import DebugOutput
-from ..output.serial_output import SerialOutput
+from ..output.serial_output import (
+    BAUDRATE_CHOICES,
+    SerialOutput,
+    SerialOutputError,
+    scan_ports,
+)
 from .piano_roll import PianoRollView
 
 #: 播放定时器间隔（毫秒）。20ms 视觉效果够用，实际时间点由引擎的单调时钟决定。
@@ -58,7 +63,7 @@ class MainWindow(QMainWindow):
 
         # 播放引擎：输出先接调试日志（写进侧栏）。
         self.debug_output = DebugOutput(emit=self.append_event_log)
-        self.serial_output = SerialOutput(port=None)  # 占位，端口未配置
+        self.serial_output = SerialOutput(port=None)  # 未选端口，见串口面板
         self.engine = PlaybackEngine(self.project, output=self.debug_output)
 
         self._timer = QTimer(self)
@@ -67,6 +72,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_menus()
+        self.refresh_serial_ports()
         self.refresh_channels()
         self._update_status()
 
@@ -90,6 +96,7 @@ class MainWindow(QMainWindow):
         channel_layout.addWidget(self.add_channel_button)
         channel_layout.addWidget(self.remove_channel_button)
         channel_layout.addWidget(self.rename_channel_button)
+        channel_layout.addWidget(self._build_serial_panel())
 
         # 中间：编辑区 + 播放控制 + 时间设置
         self.piano_roll = PianoRollView(self.project)
@@ -175,6 +182,9 @@ class MainWindow(QMainWindow):
         log_panel = QWidget()
         log_layout = QVBoxLayout(log_panel)
         log_layout.addWidget(QLabel("事件日志（播放事件输出）"))
+        log_layout.addWidget(
+            QLabel("格式：时间  开始/结束  通道下标-音高音。通道下标从 0 起，与通道列表的显示序号相差 1。")
+        )
         log_layout.addWidget(self.log_view)
         log_layout.addWidget(self.clear_log_button)
 
@@ -212,6 +222,100 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
         menu.addAction(action)
         return action
+
+    # ---------- 串口面板 ----------
+
+    def _build_serial_panel(self) -> QWidget:
+        """初步对接用的最简串口面板：选端口、选波特率、打开、发测试音。
+
+        发送编码见 output/serial_output.py：1 个字节，高 2 位通道，低 6 位音高。
+        硬件侧的接收中断尚未写好，本面板用于联调当天验证链路。
+        """
+        self.port_input = QComboBox()
+        self.refresh_ports_button = QPushButton("刷新")
+        self.refresh_ports_button.clicked.connect(self.refresh_serial_ports)
+
+        port_row = QHBoxLayout()
+        port_row.addWidget(self.port_input, 1)
+        port_row.addWidget(self.refresh_ports_button)
+
+        self.baudrate_input = QComboBox()
+        for value in BAUDRATE_CHOICES:
+            self.baudrate_input.addItem(str(value), value)
+        self.baudrate_input.setCurrentIndex(
+            max(0, self.baudrate_input.findData(self.serial_output.baudrate))
+        )
+
+        self.serial_toggle_button = QPushButton("打开串口")
+        self.serial_toggle_button.clicked.connect(self.toggle_serial)
+
+        self.test_channel_input = QSpinBox()
+        self.test_channel_input.setRange(0, 1)
+        self.test_pitch_input = QSpinBox()
+        self.test_pitch_input.setRange(0, 63)
+        self.test_pitch_input.setValue(10)
+        self.send_test_button = QPushButton("发测试音")
+        self.send_test_button.clicked.connect(self.send_test_note)
+
+        test_row = QHBoxLayout()
+        test_row.addWidget(QLabel("通道"))
+        test_row.addWidget(self.test_channel_input)
+        test_row.addWidget(QLabel("音高"))
+        test_row.addWidget(self.test_pitch_input)
+        test_row.addWidget(self.send_test_button)
+
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.addWidget(QLabel("串口（初步对接用）"))
+        layout.addLayout(port_row)
+        layout.addWidget(self.baudrate_input)
+        layout.addWidget(self.serial_toggle_button)
+        layout.addLayout(test_row)
+        return panel
+
+    def refresh_serial_ports(self) -> None:
+        """扫描当前可用串口并填入下拉框，保留已选中的那个。"""
+        current = self.port_input.currentText()
+        ports = scan_ports()
+        self.port_input.clear()
+        self.port_input.addItems(ports)
+        if current in ports:
+            self.port_input.setCurrentText(current)
+        self.serial_output.port = self.port_input.currentText() or None
+        self._update_status()
+
+    def toggle_serial(self) -> None:
+        """打开或关闭串口。失败时在事件日志里给出原因。"""
+        if self.serial_output.is_open:
+            self.serial_output.close()
+            self.append_event_log(f"串口已关闭：{self.serial_output.port}")
+        else:
+            self.serial_output.port = self.port_input.currentText() or None
+            self.serial_output.baudrate = int(self.baudrate_input.currentData())
+            try:
+                self.serial_output.open()
+            except SerialOutputError as exc:
+                QMessageBox.warning(self, "打开串口失败", str(exc))
+            else:
+                self.append_event_log(
+                    f"串口已打开：{self.serial_output.port} @ {self.serial_output.baudrate}"
+                )
+        self.serial_toggle_button.setText(
+            "关闭串口" if self.serial_output.is_open else "打开串口"
+        )
+        self._update_status()
+
+    def send_test_note(self) -> None:
+        """发送一个测试音符字节。音高填 0 表示停止该通道。"""
+        channel = int(self.test_channel_input.value())
+        pitch = int(self.test_pitch_input.value())
+        try:
+            value = self.serial_output.send_note(channel, pitch)
+        except SerialOutputError as exc:
+            QMessageBox.warning(self, "发送失败", str(exc))
+            return
+        self.append_event_log(f"发送测试音字节 0x{value:02X}（通道 {channel} 音高 {pitch}）")
+        self._update_status()
 
     # ---------- 通道操作 ----------
 

@@ -1,17 +1,37 @@
-# 多通道音序器（PC 端上位机骨架）
+# 多通道音序器（PC 端上位机）
 
-基于 CH32V 系列 MCU 的模块化合成器系统的 PC 端音序软件骨架。当前版本只做音序编辑与播放事件生成，
-串口消息格式尚未确定，播放事件输出到界面侧栏的事件日志。
+基于 CH32V 系列 MCU 的模块化合成器系统的 PC 端音序软件。当前版本可编辑、播放、保存工程，
+并把音符以 1 字节编码发往串口。硬件侧的串口接收中断尚未实现，因此实际收发未经验证。
 
 ## 当前功能
 
 - 多通道音序编辑，通道可增删改；一个通道对应一个合成器模块或乐器
 - 钢琴卷帘（`QGraphicsView` / `QGraphicsScene`）：显示网格、点击或拖动创建音符、拖动移位、拖右边缘改长度，全部吸附到整数网格
-- 音符字段：音高（0~63，0 表示休止或无音）、开始位置、持续时间；开始位置与持续时间都是「网格步进的整数个数」
+- 音符字段：音高（1~63，0 表示休止或无音）、开始位置、持续时间；开始位置与持续时间都是「网格步进的整数个数」
 - 工程级 BPM、拍号、网格步进（1/1、1/2、1/4、1/8、1/16 拍）
 - 播放 / 暂停 / 停止，播放头随播放移动
-- 播放产生统一的 `NOTE_ON` / `NOTE_OFF` 事件，交给输出适配层；当前适配器是 `DebugOutput`，写侧栏事件日志
+- 播放产生统一的 `NOTE_ON` / `NOTE_OFF` 事件，交给输出适配层
+- 输出适配层有两个：`DebugOutput` 写侧栏事件日志，`SerialOutput` 发串口
+- 界面左侧串口面板：扫描并选择端口、选择波特率、打开或关闭、发测试音
 - 工程保存/打开，JSON 文件，`format_version: 1`
+
+## 串口编码
+
+1 个字节表示一个音符。硬件侧的接收中断待实现，编码细节见同目录的 `串口协议V1草案.md`。
+
+| 位 | 含义 |
+|---|---|
+| bit7-6 | 通道号，0 或 1 |
+| bit5-0 | 音高，1 至 63；填 0 表示该通道停止发声 |
+
+| 通道 | 音高 | 字节 |
+|---|---|---|
+| 1 | 10 | `0x4A` |
+| 0 | 0 | `0x00` |
+| 1 | 63 | `0x7F` |
+
+打开串口时会先发 `00 40`，把两个通道置为静音，避免上次残留的发声状态。
+波特率默认 115200，下拉框内可选 9600 等取值，最终取值待硬件侧确认。
 
 ## 运行
 
@@ -28,15 +48,17 @@ python -m pytest tests/test_model.py tests/test_timing.py tests/test_playback.py
                                        # 只跑非界面测试，不需要 PySide6
 ```
 
-界面测试在 `QT_QPA_PLATFORM=offscreen` 下运行，不需要显示器。这一点在 `tests/test_ui_smoke.py`里用 `os.environ.setdefault` 设置，不依赖 pytest 插件。
+界面测试在 `QT_QPA_PLATFORM=offscreen` 下运行，不需要显示器。这一点在 `tests/test_ui_smoke.py` 里用 `os.environ.setdefault` 设置，不依赖 pytest 插件。
 
-如果所在环境的 pytest 无法读取它自己创建的临时目录（本项目的开发环境就是这样），改用：
+如果所在环境的 pytest 无法读取它自己创建的临时目录，改用：
 
 ```
 python -m pytest -p no:tmpdir -p no:cacheprovider
 ```
 
 `conftest.py` 提供了一个自管的 `tmp_path` 夹具顶替内置插件，测试代码本身不用改，两种跑法都能通过。
+
+当前测试数量为 106 项，全部通过。
 
 ## 目录结构
 
@@ -86,11 +108,11 @@ PlaybackEngine（core/playback.py）──► NoteEvent(kind, channel_index, pit
         │
         ▼
 OutputAdapter（output/base.py）
-   ├─ DebugOutput   写界面事件日志（当前启用）
-   └─ SerialOutput  发串口（占位，encode_event 未实现）
+   ├─ DebugOutput   写界面事件日志（播放时启用）
+   └─ SerialOutput  发串口（1 字节编码，见「串口编码」）
 ```
 
-播放引擎只产生事件，不关心事件被送到哪里。接硬件时只需实现 `SerialOutput.encode_event()`，
+播放引擎只产生事件，不关心事件被送到哪里。接硬件时只需改 `SerialOutput.encode_event()`，
 编辑器和播放引擎都不用改。
 
 ### 2. 时间单位
@@ -123,15 +145,16 @@ OutputAdapter（output/base.py）
 
 同一通道内允许音符在时间上重叠，也允许同音高重叠。数据层不做合并、不做冲突检查。
 事件层同样不合并：两个重叠的同音高音符会产生两组 `NOTE_ON` / `NOTE_OFF`。
-硬件侧如何处理重叠留给后面确认。
+硬件侧每个通道同一时刻只发一个音，后触发会覆盖前一音，具体处理方式待确认。
 
 ### 6. 待确认项（代码里已用常量集中定义）
 
 | 待确认 | 位置 | 当前取值 |
 | --- | --- | --- |
-| 通道编号从 0 开始还是 1 开始 | `sequencer/model/channel.py` 的 `CHANNEL_INDEX_BASE` | `0`（界面列表显示为 1.、2.…便于人读，注意不是数据编号） |
+| 通道编号从 0 开始还是 1 开始 | `sequencer/model/channel.py` 的 `CHANNEL_INDEX_BASE` | `0`（界面列表显示为 1.、2.…便于人读，与数据编号不同） |
 | 音高集合与频率映射 | 硬件确定，PC 端不做换算 | 有效音高 1~63，0 为休止 |
-| 串口消息格式 | `sequencer/output/serial_output.py` 的 `encode_event()` | 未实现，调用即抛异常 |
+| 串口波特率 | `sequencer/output/serial_output.py` 的 `DEFAULT_BAUDRATE` | `115200`，下拉框可选 9600 等；固件源码中另有 9600 的取值，待确认 |
+| 音符关闭的表达 | `sequencer/output/serial_output.py` 的 `encode_event()` | 发送通道号加音高 0，即停止该通道 |
 | 拍号是否影响 BPM 基准 | `sequencer/core/timing.py` | 当前不影响，BPM 按四分音符计 |
 
 ## 工程文件格式
@@ -167,5 +190,3 @@ OutputAdapter（output/base.py）
    pytest 内置临时目录插件，没有引入任何第三方插件。
 3. 增加了 `pytest.ini`。只设置 `testpaths = tests`。
 4. 其余目录与文件名与目标结构一致，`sequencer/` 包的内部模块没有增删。
-
-
