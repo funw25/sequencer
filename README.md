@@ -83,9 +83,9 @@ sequencer/
 │  ├─ output/                 # 输出适配层
 │  │  ├─ base.py              # OutputAdapter 接口（只有这一个接口）
 │  │  ├─ debug_output.py      # 事件格式化到界面日志
-│  │  └─ serial_output.py     # pyserial 占位，消息格式待定
+│  │  └─ serial_output.py     # 1 字节编码与发送，见「串口编码」
 │  └─ ui/
-│     ├─ main_window.py       # 菜单、通道面板、编辑区、播放控制、事件日志
+│     ├─ main_window.py       # 菜单、通道面板、编辑区、播放控制、事件日志、串口面板
 │     ├─ piano_roll.py        # 钢琴卷帘视图 + 网格 + 播放头 + 鼠标编辑
 │     └─ app.py               # 入口 main()
 └─ tests/
