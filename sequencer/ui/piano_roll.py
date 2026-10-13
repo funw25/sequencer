@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QGraphicsRectItem,
     QGraphicsScene,
@@ -26,16 +26,26 @@ from ..model.project import Project
 
 STEP_WIDTH_PX = 24.0  # 一个网格的宽度
 NOTE_HEIGHT_PX = 12.0  # 一个音高行的高度
-RULER_HEIGHT_PX = 16.0  # 顶部刻度条高度
+RULER_HEIGHT_PX = 18.0  # 顶部刻度条高度
 RESIZE_EDGE_PX = 6.0  # 距右边缘多少像素内算「拖长度」
 MIN_VISIBLE_STEPS = 64  # 内容不足时的最小可见网格数
-GRID_LINE = "#3C3C3C"
-GRID_LINE_BEAT = "#6E6E6E"
-GRID_BACK = "#1E1E1E"
-RULER_BACK = "#2A2A2A"
+KEYBOARD_WIDTH_PX = 52.0  # 左侧固定键盘列的宽度，绘制在视口坐标下
+
+GRID_LINE = "#464646"
+GRID_LINE_BEAT = "#7A7A7A"
+GRID_LINE_BAR = "#A8A8A8"
+GRID_BACK = "#1B1B1B"
+RULER_BACK = "#2E2E2E"
+KEYBOARD_WHITE = "#D8D8D8"
+KEYBOARD_BLACK = "#3A3A3A"
+KEYBOARD_LINE = "#101010"
 PLAYHEAD_COLOR = "#FF4C4C"
-LABEL_COLOR = "#B0B0B0"
-NOTE_BORDER = "#101010"
+LABEL_COLOR = "#D0D0D0"
+NOTE_BORDER = "#0A0A0A"
+NOTE_SELECTED_BORDER = "#FFFFFF"
+
+#: 一个八度内黑键相对 C 的偏移。
+_BLACK_KEY_OFFSETS = (1, 3, 6, 8, 10)
 
 
 class PianoRollView(QGraphicsView):
@@ -69,6 +79,71 @@ class PianoRollView(QGraphicsView):
         self._drag_grab_offset_steps = 0.0  # 按下点相对音符起始的网格偏移（浮点）
 
         self._rebuild_scene()
+        self._center_on_middle_register()
+
+    def _center_on_middle_register(self) -> None:
+        """初次显示时把视口落在音域中部，避免打开就看到空白的低音区。"""
+        self.centerOn(0.0, self._pitch_to_y(MAX_PITCH // 2))
+
+    # ---------- 左侧键盘列 ----------
+
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
+        """在视口左侧画固定的钢琴键盘。
+
+        painter 的坐标系是场景坐标，带滚动偏移，因此把原点平移回视口左上角后再画，
+        键盘固定在左侧，不随横向滚动移动。
+        """
+        super().drawForeground(painter, rect)
+        offset = self.mapToScene(0, 0)
+        height = self.viewport().height()
+        painter.save()
+        painter.translate(offset)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        # 先铺满整条背景，避免场景内容从键盘下面透出来
+        painter.fillRect(
+            QRectF(0.0, 0.0, KEYBOARD_WIDTH_PX, height), QColor(RULER_BACK)
+        )
+
+        for pitch in range(MAX_PITCH + 1):
+            y = self._pitch_to_y(pitch)
+            if y + NOTE_HEIGHT_PX < 0 or y > height:
+                continue
+            is_black = pitch % 12 in _BLACK_KEY_OFFSETS
+            # 黑键短，且靠键盘右侧，贴近真实键盘的排列
+            width = KEYBOARD_WIDTH_PX * (0.62 if is_black else 1.0)
+            x = KEYBOARD_WIDTH_PX - width
+            painter.fillRect(
+                QRectF(x, y, width, NOTE_HEIGHT_PX),
+                QColor(KEYBOARD_BLACK if is_black else KEYBOARD_WHITE),
+            )
+            painter.setPen(QPen(QColor(KEYBOARD_LINE), 0))
+            painter.drawLine(0.0, y, KEYBOARD_WIDTH_PX, y)
+
+        # C 音标注音名，便于定位八度
+        painter.setPen(QPen(QColor(LABEL_COLOR), 0))
+        font = painter.font()
+        font.setPointSize(7)
+        painter.setFont(font)
+        for pitch in range(0, MAX_PITCH + 1, 12):
+            y = self._pitch_to_y(pitch)
+            if y < 0 or y > height:
+                continue
+            painter.drawText(
+                QRectF(3.0, y, KEYBOARD_WIDTH_PX - 5.0, NOTE_HEIGHT_PX),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                f"C{pitch // 12}",
+            )
+
+        painter.setPen(QPen(QColor(KEYBOARD_LINE), 1))
+        painter.drawLine(KEYBOARD_WIDTH_PX, 0.0, KEYBOARD_WIDTH_PX, height)
+        painter.drawLine(0.0, 0.0, 0.0, height)
+        painter.restore()
+
+    @staticmethod
+    def _in_keyboard(pos) -> bool:
+        """视口坐标是否落在左侧键盘列内。"""
+        return pos.x() < KEYBOARD_WIDTH_PX
 
     # ---------- 场景构建 ----------
 
@@ -114,36 +189,61 @@ class PianoRollView(QGraphicsView):
         self._scene.addItem(ruler)
 
         grid_step = self.project.grid_step
+        # 一小节的网格数。拍号分子为每小节的拍数，分母目前不参与换算。
+        steps_per_bar = grid_step * self.project.time_signature_numerator
         step_pen = QPen(QColor(GRID_LINE))
         step_pen.setCosmetic(True)
         beat_pen = QPen(QColor(GRID_LINE_BEAT))
         beat_pen.setCosmetic(True)
+        bar_pen = QPen(QColor(GRID_LINE_BAR))
+        bar_pen.setCosmetic(True)
         for step in range(self._max_steps + 1):
             x = step * STEP_WIDTH_PX
             line = self._scene.addLine(x, RULER_HEIGHT_PX, x, height, step_pen)
             line.setZValue(-1)
-            if step % grid_step == 0:
-                # 每一拍一条加粗线，并在刻度条上标出拍号
-                beat_line = self._scene.addLine(x, RULER_HEIGHT_PX, x, height, beat_pen)
-                beat_line.setZValue(-1)
-                label = QGraphicsSimpleTextItem(str(step // grid_step))
-                label.setBrush(QBrush(QColor(LABEL_COLOR)))
-                label.setPos(x + 2.0, 1.0)
-                label.setZValue(-1)
-                self._scene.addItem(label)
+            if step % grid_step:
+                continue
+            beat = step // grid_step
+            is_bar = steps_per_bar > 0 and step % steps_per_bar == 0
+            # 小节线最亮，拍线次之，网格线最暗
+            line = self._scene.addLine(
+                x, RULER_HEIGHT_PX, x, height, bar_pen if is_bar else beat_pen
+            )
+            line.setZValue(-1)
+            # 小节标小节号，其余拍只在刻度条上标拍号，避免文字过密
+            if is_bar:
+                text = str(step // steps_per_bar + 1)
+            elif grid_step >= 2:
+                text = f".{beat % self.project.time_signature_numerator}"
+            else:
+                continue
+            label = QGraphicsSimpleTextItem(text)
+            label.setBrush(QBrush(QColor(LABEL_COLOR)))
+            label.setPos(x + 3.0, 2.0)
+            label.setZValue(-1)
+            self._scene.addItem(label)
 
         row_pen = QPen(QColor(GRID_LINE))
         row_pen.setCosmetic(True)
+        black_pen = QPen(QColor("#2A2A2A"))
+        black_pen.setCosmetic(True)
         for pitch in range(MAX_PITCH + 1):
             y = self._pitch_to_y(pitch)
-            line = self._scene.addLine(0.0, y, width, y, row_pen)
+            # 黑键行用更暗的底色，便于在深色网格里辨认音高位置
+            if pitch % 12 in _BLACK_KEY_OFFSETS:
+                band = QGraphicsRectItem(QRectF(0.0, y, width, NOTE_HEIGHT_PX))
+                band.setBrush(QBrush(QColor("#232323")))
+                band.setPen(QPen(Qt.PenStyle.NoPen))
+                band.setZValue(-1.5)
+                self._scene.addItem(band)
+            line = self._scene.addLine(0.0, y, width, y, row_pen if pitch % 12 == 0 else black_pen)
             line.setZValue(-1)
-            if pitch in (0, 12, 24, 36, 48, 63):
-                label = QGraphicsSimpleTextItem(str(pitch))
-                label.setBrush(QBrush(QColor(LABEL_COLOR)))
-                label.setPos(2.0, y + 1.0)
-                label.setZValue(-1)
-                self._scene.addItem(label)
+            if pitch % 12 == 0:
+                # 八度起始处画一条略亮的横线，音高数值由左侧键盘列标示
+                octave_pen = QPen(QColor(GRID_LINE_BEAT))
+                octave_pen.setCosmetic(True)
+                octave_line = self._scene.addLine(0.0, y, width, y, octave_pen)
+                octave_line.setZValue(-1)
 
     def _draw_playhead(self) -> None:
         item = QGraphicsRectItem(QRectF(0.0, 0.0, 2.0, self._scene_rect().height()))
@@ -188,7 +288,9 @@ class PianoRollView(QGraphicsView):
         item.setRect(self._note_rect(note))
         color = QColor(self.channel.color) if self.channel else QColor("#4C8BF5")
         item.setBrush(QBrush(color))
-        pen = QPen(QColor(NOTE_BORDER))
+        # 正在拖动的音符用亮边框标出，便于确认操作对象
+        border = NOTE_SELECTED_BORDER if note is self._drag_note else NOTE_BORDER
+        pen = QPen(QColor(border))
         pen.setCosmetic(True)
         item.setPen(pen)
 
@@ -234,6 +336,9 @@ class PianoRollView(QGraphicsView):
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton or self.channel is None:
             super().mousePressEvent(event)
+            return
+        if self._in_keyboard(event.position()):
+            # 左侧键盘列只用于定位，不受编辑操作影响
             return
         pos = self.mapToScene(event.position().toPoint())
         note = self._note_at(pos)
