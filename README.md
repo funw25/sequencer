@@ -168,12 +168,4 @@ OutputAdapter（output/base.py）
 3. 增加了 `pytest.ini`。只设置 `testpaths = tests`。
 4. 其余目录与文件名与目标结构一致，`sequencer/` 包的内部模块没有增删。
 
-## 明确未实现的部分
 
-- 串口协议与 `SerialOutput.encode_event()`：只留签名和占位，调用即抛 `NotImplementedError`
-- 音高到频率的映射：PC 端不做
-- 力度、音量、模块参数
-- 撤销/重做、多选、框选、复制粘贴、右键菜单、全局快捷键系统（只有主菜单里自带的
-  `Ctrl+N` / `Ctrl+O` / `Ctrl+S` / `Ctrl+Q`）
-- 旧版本工程文件的兼容与迁移
-- 音频预览：本机不发声，播放结果只体现在事件日志和播放头上
