@@ -203,3 +203,7 @@ OutputAdapter（output/base.py）
 - `conftest.py`：自管的 `tmp_path` 夹具，顶替本环境下不可用的 pytest 内置临时目录插件，
   测试代码本身不用改。没有引入第三方插件。
 - `pytest.ini`：只设置 `testpaths = tests`。
+
+
+### other：
+正在进行界面优化及丰荣，目前丑得惊天动地
