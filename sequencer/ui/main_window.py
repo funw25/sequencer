@@ -1,9 +1,9 @@
-"""主窗口：菜单、通道面板、钢琴卷帘编辑区、播放控制、BPM/网格输入、事件日志侧栏。
+"""主窗口：菜单、通道面板、钢琴卷帘编辑区、播放控制、BPM/网格输入、事件日志侧栏、串口面板。
 
 播放链路：
     QTimer(20ms) -> PlaybackEngine.step() -> NoteEvent -> 输出适配层
-    输出适配层当前用 DebugOutput 写事件日志；SerialOutput 已留占位但不启用。
-界面层只做这三件事，不直接操作串口。
+    输出适配层两个：DebugOutput 写事件日志，SerialOutput 发串口。
+界面层只产生事件，不直接操作串口。
 """
 
 from __future__ import annotations
@@ -249,10 +249,10 @@ class MainWindow(QMainWindow):
     # ---------- 串口面板 ----------
 
     def _build_serial_panel(self) -> QWidget:
-        """初步对接用的最简串口面板：选端口、选波特率、打开、发测试音。
+        """串口面板：选端口、选波特率、打开、发测试音。
 
         发送编码见 output/serial_output.py：1 个字节，高 2 位通道，低 6 位音高。
-        硬件侧的接收中断尚未写好，本面板用于联调当天验证链路。
+        本面板用于联调时验证链路。
         """
         self.port_input = QComboBox()
         self.refresh_ports_button = QPushButton("刷新")
@@ -600,7 +600,7 @@ class MainWindow(QMainWindow):
     def _sync_inputs(self, project: Project) -> None:
         """把工程的 BPM、拍号、网格写回输入框。
 
-        同步时屏蔽信号，避免把「界面刷新」当成「用户改值」再写回工程。
+        同步时屏蔽信号，避免把界面刷新当成改值再写回工程。
         """
         self.bpm_input.blockSignals(True)
         self.numerator_input.blockSignals(True)
@@ -636,15 +636,15 @@ class MainWindow(QMainWindow):
             f"网格 1/{self.project.grid_step} 拍｜{state}｜输出：{self.debug_output.describe()}"
         )
         self.length_label.setText(
-            f"提示：音高 0 表示休止；串口输出为占位实现（{self.serial_output.describe()}）。"
+            f"提示：音高 0 表示休止。串口输出：{self.serial_output.describe()}。"
         )
 
     def show_about(self) -> None:
         QMessageBox.information(
             self,
             "关于",
-            "多通道音序器上位机骨架\n"
-            "编辑器只产生 NOTE_ON / NOTE_OFF 事件，串口消息格式待定。",
+            "多通道音序器上位机\n"
+            "编辑器只产生 NOTE_ON / NOTE_OFF 事件，经输出适配层写出。",
         )
 
     # ---------- 生命周期 ----------

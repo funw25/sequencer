@@ -1,5 +1,5 @@
 """通道数据类：一个通道对应一个合成器模块或乐器。
-通道编号基准待确认，集中在 CHANNEL_INDEX_BASE 定义。
+通道编号基准集中在 CHANNEL_INDEX_BASE 定义。
 改这一个常量即可切换 0 起编或 1 起编，其它代码不要硬编码编号含义。
 """
 
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from .note import Note, NoteError
 
-# 通道编号从几开始。待团队确认（0起编 /1起编），当前取 0。
+# 通道编号从几开始。当前取 0，即 0 起编。
 # 注意：本项目里通道的「列表下标」始终从 0 开始，
 # CHANNEL_INDEX_BASE 只影响对外展示和默认命名。
 CHANNEL_INDEX_BASE = 0

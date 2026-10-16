@@ -13,7 +13,7 @@ class OutputAdapter:
     默认什么都不做，方便只打日志的适配器（如 DebugOutput）。
     """
 
-    #: 显示给用户看的名字。
+    #: 显示用的名字。
     name = "output"
 
     def open(self) -> None:
