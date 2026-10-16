@@ -7,6 +7,7 @@ from sequencer.core.playback import (
     EVENT_NOTE_ON,
     NoteEvent,
     PlaybackEngine,
+    audible_channels,
     collect_events,
     project_duration_seconds,
 )
@@ -355,3 +356,90 @@ def test_engine_loop_pause_resumes_from_loop_start(clock):
     clock.advance(0.1)
     engine.step()
     assert engine.elapsed_seconds == pytest.approx(0.1)
+
+
+# ---------- 静音与独奏 ----------
+
+
+def test_muted_channel_produces_no_events():
+    project = make_project()
+    project.channels[0].muted = True
+    events = collect_events(project)
+    assert events
+    assert all(event.channel_index == 1 for event in events)
+
+
+def test_solo_limits_playback_to_soloed_channels():
+    project = make_project()
+    project.channels[1].soloed = True
+    events = collect_events(project)
+    assert events
+    assert all(event.channel_index == 1 for event in events)
+
+
+def test_mute_wins_over_solo_on_the_same_channel():
+    project = make_project()
+    project.channels[1].soloed = True
+    project.channels[1].muted = True
+    assert collect_events(project) == []
+
+
+def test_all_channels_muted_gives_no_events():
+    project = make_project()
+    for channel in project.channels:
+        channel.muted = True
+    assert collect_events(project) == []
+
+
+def test_audible_channels_reports_candidates():
+    project = make_project()
+    assert audible_channels(project) == list(project.channels)
+    project.channels[0].muted = True
+    assert audible_channels(project) == [project.channels[1]]
+
+    project.channels[0].muted = False
+    project.channels[0].soloed = True
+    assert audible_channels(project) == [project.channels[0]]
+
+
+# ---------- 定位（时间轴拖动） ----------
+
+
+def test_engine_seek_moves_position_without_playing():
+    engine = PlaybackEngine(make_project())
+    engine.seek(2)
+    assert engine.is_playing is False
+    assert engine.elapsed_steps == 2
+
+
+def test_engine_seek_while_playing_continues_from_there(clock):
+    project = make_project()
+    sink = _RecordingOutput()
+    engine = PlaybackEngine(project, output=sink)
+    engine.play()
+    clock.advance(0.1)
+    engine.step()
+
+    released = engine.seek(0)  # 回到起点，先补发悬挂音的 NOTE_OFF
+    assert engine.is_playing is True
+    assert engine.elapsed_steps == 0
+    assert any(event.kind == EVENT_NOTE_OFF for event in released)
+    assert any(event.kind == EVENT_NOTE_ON for event in released)
+
+
+def test_engine_seek_then_play_continues_from_new_position(clock):
+    engine = PlaybackEngine(make_project())
+    engine.play()
+    clock.advance(0.1)
+    engine.step()
+    engine.pause()
+
+    engine.seek(4)
+    engine.play()  # 不带参数 = 从当前位置继续
+    assert engine.start_step == 4
+
+
+def test_engine_seek_rejects_negative_step():
+    engine = PlaybackEngine(make_project())
+    with pytest.raises(ValueError):
+        engine.seek(-1)

@@ -84,17 +84,30 @@ class NoteEvent:
         )
 
 
+def audible_channels(project: Project) -> list:
+    """本次播放要发声的通道。
+
+    有任一通道处于独奏时，候选只有独奏通道；否则候选是全部通道。
+    静音在候选里再筛一遍，所以「独奏且静音」的通道仍然是静音的。
+    静音与独奏只影响播放，不影响数据与编辑。
+    """
+    soloed = [channel for channel in project.channels if channel.soloed]
+    candidates = soloed or list(project.channels)
+    return [channel for channel in candidates if not channel.muted]
+
+
 def collect_events(project: Project, start_step: int = 0) -> list[NoteEvent]:
     """把工程展平成按时间排序的事件列表。
 
     start_step 之后的音符会给出 NOTE_ON / NOTE_OFF 成对事件；
     跨越 start_step 的音符只给 NOTE_OFF（它的 NOTE_ON 在过去，已经错过），
     这样既不会漏掉结束，也不会产生没有对应的开始。
+    静音与独奏的通道不产生事件，见 audible_channels()。
     """
     events: list[NoteEvent] = []
     bpm = project.bpm
     grid_step = project.grid_step
-    for channel in project.channels:
+    for channel in audible_channels(project):
         for note in channel:
             if note.pitch == 0:
                 # 音高 0 表示休止或无音，不产生事件。
@@ -233,6 +246,26 @@ class PlaybackEngine:
         self._next_index = 0
         self._events = []
         self._start_step = 0
+        return released
+
+    def seek(self, start_step: int) -> list[NoteEvent]:
+        """把播放位置挪到指定网格。
+
+        播放中就从新位置接着放，先给正在发声的音符补 NOTE_OFF，避免悬挂音；
+        停止状态下只移动位置，不开始播放。返回本次立即产生的事件。
+        """
+        if start_step < 0:
+            raise ValueError(f"start_step 不能为负，实际是 {start_step}")
+        released = self._release_sounding() if self._playing else []
+        self._start_step = start_step
+        self._events = collect_events(self.project, start_step=start_step)
+        self._next_index = 0
+        self._accumulated = step_to_seconds(
+            start_step, self.project.bpm, self.project.grid_step
+        )
+        self._started_at = time.monotonic() if self._playing else None
+        if self._playing:
+            return released + self.step()
         return released
 
     def step(self) -> list[NoteEvent]:

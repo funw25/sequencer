@@ -26,18 +26,28 @@ DEFAULT_COLORS = (
 
 
 class Channel:
-    """一个通道：编号、名称、颜色、音符集合。
+    """一个通道：编号、名称、颜色、音符集合，外加静音与独奏两个播放开关。
 
     音符以 list 保存，允许重叠，也允许同一个音高在同一时间重复出现。
     增删查改都走本类的方法，外部不要直接改内部列表。
+    muted / soloed 只影响播放时是否产生事件，不影响数据与编辑。
     """
 
-    def __init__(self, index: int, name: str = "", color: str = "") -> None:
+    def __init__(
+        self,
+        index: int,
+        name: str = "",
+        color: str = "",
+        muted: bool = False,
+        soloed: bool = False,
+    ) -> None:
         if isinstance(index, bool) or not isinstance(index, int) or index < 0:
             raise NoteError(f"通道下标必须是非负整数，实际是 {index!r}")
         self.index = index
         self.name = name or f"通道 {index + CHANNEL_INDEX_BASE}"
         self.color = color or DEFAULT_COLORS[index % len(DEFAULT_COLORS)]
+        self.muted = bool(muted)
+        self.soloed = bool(soloed)
         self._notes: list[Note] = []
 
     # ---------- 查询 ----------
@@ -100,12 +110,17 @@ class Channel:
             "index": self.index,
             "name": self.name,
             "color": self.color,
+            "muted": self.muted,
+            "soloed": self.soloed,
             "notes": [n.to_dict() for n in self._notes],
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Channel":
-        """从字典还原通道及其音符。"""
+        """从字典还原通道及其音符。
+
+        缺少 muted / soloed 的旧工程按未静音、未独奏处理。
+        """
         if not isinstance(data, dict):
             raise NoteError(f"通道数据必须是字典，实际是 {type(data).__name__}")
         for key in ("index", "notes"):
@@ -115,6 +130,8 @@ class Channel:
             index=data["index"],
             name=data.get("name", ""),
             color=data.get("color", ""),
+            muted=data.get("muted", False),
+            soloed=data.get("soloed", False),
         )
         channel.replace_notes(Note.from_dict(item) for item in data["notes"])
         return channel

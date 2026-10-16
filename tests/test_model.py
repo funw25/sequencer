@@ -208,3 +208,29 @@ def test_project_allows_cross_channel_overlap():
     project.create_note(1, 60, 0, 4)
     assert len(project.channel_at(0)) == 1
     assert len(project.channel_at(1)) == 1
+
+
+# ---------- 通道静音与独奏 ----------
+
+
+def test_channel_defaults_to_unmuted_and_unsoloed():
+    channel = Channel(index=0)
+    assert (channel.muted, channel.soloed) == (False, False)
+
+
+def test_channel_keeps_mute_and_solo_through_a_dict_round_trip():
+    channel = Channel(index=1, name="贝斯", color="#E8663D", muted=True, soloed=True)
+    channel.create_note(40, 0, 4)
+
+    restored = Channel.from_dict(channel.to_dict())
+    assert restored.muted is True
+    assert restored.soloed is True
+    assert restored.name == "贝斯"
+    assert [note.pitch for note in restored] == [40]
+
+
+def test_channel_dict_without_mute_fields_loads_as_off():
+    """旧工程文件没有这两个字段，按未静音、未独奏处理。"""
+    data = {"index": 0, "name": "通道 0", "color": "#4C8BF5", "notes": []}
+    channel = Channel.from_dict(data)
+    assert (channel.muted, channel.soloed) == (False, False)
