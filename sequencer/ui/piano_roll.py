@@ -8,6 +8,9 @@
 
 本模块只负责显示与鼠标编辑，不碰串口、不碰播放时钟。
 音符集合始终指向选中的那个 Channel，编辑直接改 Channel 里的 Note 对象。
+
+一次鼠标编辑（新建、移动、改长度）在开始时发 editStarted、结束时发 editFinished，
+主窗口用这两个信号在编辑前存一份快照，编辑后决定是否记进撤销栈。
 """
 
 from __future__ import annotations
@@ -56,6 +59,8 @@ class PianoRollView(QGraphicsView):
     """
 
     notesChanged = Signal()  # 音符被增删改后发出，主窗口用来刷新状态栏
+    editStarted = Signal()  # 一次鼠标编辑开始，此时还没改动音符
+    editFinished = Signal()  # 一次鼠标编辑结束
 
     def __init__(self, project: Project, parent=None) -> None:
         super().__init__(parent)
@@ -342,6 +347,8 @@ class PianoRollView(QGraphicsView):
             return
         pos = self.mapToScene(event.position().toPoint())
         note = self._note_at(pos)
+        # 先发信号再改数据：主窗口在这时存下「编辑前」的快照。
+        self.editStarted.emit()
         if note is not None:
             if pos.x() >= self._note_rect(note).right() - RESIZE_EDGE_PX:
                 self._mode = "resize"
@@ -388,6 +395,7 @@ class PianoRollView(QGraphicsView):
             self._drag_note = None
             self._sync_notes()
             self.notesChanged.emit()
+            self.editFinished.emit()
             return
         super().mouseReleaseEvent(event)
 

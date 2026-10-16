@@ -275,3 +275,83 @@ def test_engine_elapsed_steps_tracks_playhead(clock):
     assert engine.elapsed_steps == 2
     clock.advance(0.125)  # 再一格
     assert engine.elapsed_steps == 3
+
+
+# ---------- 循环播放 ----------
+
+
+def test_engine_loop_replays_from_start_after_the_end(clock):
+    project = make_project()  # 总长 0.5s
+    sink = _RecordingOutput()
+    engine = PlaybackEngine(project, output=sink)
+    engine.loop_enabled = True
+
+    engine.play()
+    clock.advance(0.6)  # 越过工程结尾
+    engine.step()
+
+    assert engine.is_playing is True
+    # 绕回起点：位置归零，并重新发出第 0 格的事件
+    assert engine.elapsed_steps == 0
+    assert sink.events[-1].kind == EVENT_NOTE_ON
+    assert sink.events[-1].time_seconds == pytest.approx(0.0)
+
+
+def test_engine_loop_keeps_playing_across_wraps(clock):
+    project = make_project()
+    sink = _RecordingOutput()
+    engine = PlaybackEngine(project, output=sink)
+    engine.loop_enabled = True
+    engine.play()
+
+    for _ in range(3):
+        clock.advance(0.6)
+        engine.step()
+
+    assert engine.is_playing is True
+    # 开场一次，之后每绕回一次再发一次
+    starts = [e for e in sink.events if e.kind == EVENT_NOTE_ON and e.pitch == 60]
+    assert len(starts) == 4
+
+
+def test_engine_loop_off_stops_at_the_end(clock):
+    project = make_project()
+    engine = PlaybackEngine(project)
+    engine.loop_enabled = True
+    engine.play()
+    clock.advance(0.1)
+    engine.step()
+
+    engine.loop_enabled = False  # 播放中关掉循环：本轮放完即停
+    clock.advance(0.5)
+    engine.step()
+    assert engine.is_playing is False
+
+
+def test_engine_loop_stops_when_there_is_nothing_to_play(clock):
+    """全是不发声的音高 0：没有事件可放，绕回会空转，必须停下来。"""
+    project = Project(bpm=BPM, grid_step=GRID)
+    project.add_channel()
+    project.create_note(0, 0, 0, 4)
+
+    engine = PlaybackEngine(project)
+    engine.loop_enabled = True
+    engine.play()
+    assert engine.is_playing is False
+
+
+def test_engine_loop_pause_resumes_from_loop_start(clock):
+    """绕回之后再暂停，恢复播放应落在循环起点那一段。"""
+    project = make_project()
+    engine = PlaybackEngine(project)
+    engine.loop_enabled = True
+    engine.play()
+    clock.advance(0.6)
+    engine.step()  # 这一步绕回起点
+
+    engine.pause()
+    clock.advance(0.05)
+    engine.play()
+    clock.advance(0.1)
+    engine.step()
+    assert engine.elapsed_seconds == pytest.approx(0.1)

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..core.history import History
 from ..core.playback import PlaybackEngine
 from ..io.project_io import ProjectIOError, load_project, save_project
 from ..model.project import ALLOWED_GRID_STEPS, Project
@@ -66,6 +67,10 @@ class MainWindow(QMainWindow):
         self.serial_output = SerialOutput(port=None)  # 未选端口，见串口面板
         self.engine = PlaybackEngine(self.project, output=self.debug_output)
 
+        # 撤销历史：保存每次编辑前的工程快照，见 core/history.py。
+        self.history = History()
+        self._pending_snapshot: dict | None = None
+
         self._timer = QTimer(self)
         self._timer.setInterval(TICK_INTERVAL_MS)
         self._timer.timeout.connect(self._on_tick)
@@ -74,6 +79,7 @@ class MainWindow(QMainWindow):
         self._build_menus()
         self.refresh_serial_ports()
         self.refresh_channels()
+        self._refresh_history_actions()
         self._update_status()
 
     # ---------- 界面搭建 ----------
@@ -101,6 +107,8 @@ class MainWindow(QMainWindow):
         # 中间：编辑区 + 播放控制 + 时间设置
         self.piano_roll = PianoRollView(self.project)
         self.piano_roll.notesChanged.connect(self._update_status)
+        self.piano_roll.editStarted.connect(self._on_note_edit_started)
+        self.piano_roll.editFinished.connect(self._on_note_edit_finished)
 
         self.play_button = QPushButton("播放")
         self.play_button.clicked.connect(self.play)
@@ -108,6 +116,11 @@ class MainWindow(QMainWindow):
         self.pause_button.clicked.connect(self.pause)
         self.stop_button = QPushButton("停止")
         self.stop_button.clicked.connect(self.stop)
+
+        self.loop_button = QPushButton("循环")
+        self.loop_button.setCheckable(True)
+        self.loop_button.setToolTip("循环播放整个工程（Ctrl+L）")
+        self.loop_button.toggled.connect(self.set_loop_enabled)
 
         self.bpm_input = QDoubleSpinBox()
         self.bpm_input.setRange(1.0, 400.0)
@@ -144,6 +157,7 @@ class MainWindow(QMainWindow):
         control_row.addWidget(self.play_button)
         control_row.addWidget(self.pause_button)
         control_row.addWidget(self.stop_button)
+        control_row.addWidget(self.loop_button)
         control_row.addSpacing(12)
         control_row.addWidget(QLabel("BPM"))
         control_row.addWidget(self.bpm_input)
@@ -207,10 +221,19 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         self._add_action(file_menu, "退出", self.close, "Ctrl+Q")
 
+        edit_menu = self.menuBar().addMenu("编辑(&E)")
+        self.undo_action = self._add_action(edit_menu, "撤销", self.undo, "Ctrl+Z")
+        self.redo_action = self._add_action(edit_menu, "重做", self.redo, "Ctrl+Shift+Z")
+        self.redo_action.setShortcuts(["Ctrl+Shift+Z", "Ctrl+Y"])
+
         play_menu = self.menuBar().addMenu("播放(&P)")
         self._add_action(play_menu, "播放", self.play)
         self._add_action(play_menu, "暂停", self.pause)
         self._add_action(play_menu, "停止", self.stop)
+        self.loop_action = self._add_action(
+            play_menu, "循环播放", self._on_loop_action, "Ctrl+L"
+        )
+        self.loop_action.setCheckable(True)
 
         help_menu = self.menuBar().addMenu("帮助(&H)")
         self._add_action(help_menu, "关于", self.show_about)
@@ -346,17 +369,21 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def add_channel(self) -> None:
+        before = self._snapshot()
         self.project.add_channel()
         self.channel_list.setCurrentRow(len(self.project.channels) - 1)
         self.refresh_channels()
+        self._record("添加通道", before)
 
     def remove_channel(self) -> None:
         row = self.channel_list.currentRow()
         if row < 0:
             QMessageBox.information(self, "删除通道", "当前没有选中的通道。")
             return
+        before = self._snapshot()
         self.project.remove_channel(row)
         self.refresh_channels()
+        self._record("删除通道", before)
 
     def rename_channel(self) -> None:
         row = self.channel_list.currentRow()
@@ -364,9 +391,68 @@ class MainWindow(QMainWindow):
             return
         channel = self.project.channel_at(row)
         text, ok = QInputDialog.getText(self, "重命名通道", "通道名称：", text=channel.name)
-        if ok and text:
+        if ok and text and text != channel.name:
+            before = self._snapshot()
             channel.name = text
             self.refresh_channels()
+            self._record("重命名通道", before)
+
+    # ---------- 撤销与重做 ----------
+
+    def _snapshot(self) -> dict:
+        """当前工程的数据快照。"""
+        return self.project.to_dict()
+
+    def _record(self, label: str, before: dict) -> None:
+        """把一次编辑记进撤销栈。before 是编辑前取好的快照。"""
+        self.history.record(label, before)
+        self._refresh_history_actions()
+
+    def _on_note_edit_started(self) -> None:
+        """鼠标按下、还没改动音符时存一份快照。"""
+        self._pending_snapshot = self._snapshot()
+
+    def _on_note_edit_finished(self) -> None:
+        """鼠标松开：只有真的改了东西才记一步，空点不进撤销栈。"""
+        before, self._pending_snapshot = self._pending_snapshot, None
+        if before is None or before == self._snapshot():
+            return
+        self._record("编辑音符", before)
+
+    def undo(self) -> None:
+        entry = self.history.undo(self._snapshot())
+        if entry is None:
+            return
+        label, snapshot = entry
+        self._apply_snapshot(snapshot)
+        self.append_event_log(f"撤销：{label}")
+
+    def redo(self) -> None:
+        entry = self.history.redo(self._snapshot())
+        if entry is None:
+            return
+        label, snapshot = entry
+        self._apply_snapshot(snapshot)
+        self.append_event_log(f"重做：{label}")
+
+    def _apply_snapshot(self, snapshot: dict) -> None:
+        """用快照重建工程。保持文件路径、当前通道与界面输入一致。"""
+        self.stop()
+        project = Project.from_dict(snapshot)
+        self.project = project
+        self.engine.project = project
+        self.piano_roll.project = project
+        if not project.channels:
+            self.piano_roll.channel_index = -1
+        elif not 0 <= self.piano_roll.channel_index < len(project.channels):
+            self.piano_roll.channel_index = 0
+        self._sync_inputs(project)
+        self.refresh_channels()
+        self._refresh_history_actions()
+
+    def _refresh_history_actions(self) -> None:
+        self.undo_action.setEnabled(self.history.can_undo)
+        self.redo_action.setEnabled(self.history.can_redo)
 
     # ---------- 时间设置 ----------
 
@@ -412,6 +498,23 @@ class MainWindow(QMainWindow):
         self.piano_roll.reset_playhead()
         self._set_playback_buttons(playing=False)
         self._update_status()
+
+    def set_loop_enabled(self, enabled: bool) -> None:
+        """开关循环播放，同步按钮与菜单的勾选状态。
+
+        循环范围为整个工程。播放中开关立即生效：关掉后本轮放完即停。
+        """
+        enabled = bool(enabled)
+        self.engine.loop_enabled = enabled
+        for widget in (self.loop_button, self.loop_action):
+            widget.blockSignals(True)
+            widget.setChecked(enabled)
+            widget.blockSignals(False)
+        self.append_event_log("循环播放：开" if enabled else "循环播放：关")
+        self._update_status()
+
+    def _on_loop_action(self, checked: bool = False) -> None:
+        self.set_loop_enabled(checked)
 
     def _on_tick(self) -> None:
         """定时器回调：推进播放引擎，刷新播放头。"""
@@ -483,7 +586,22 @@ class MainWindow(QMainWindow):
         self.piano_roll.project = project
         self.piano_roll.channel_index = 0 if project.channels else -1
 
-        # 同步输入框时屏蔽信号，避免把「界面刷新」当成「用户改值」再写回工程。
+        self._sync_inputs(project)
+
+        # 换了工程就没有可撤销的旧编辑了。
+        self.history.clear()
+        self._pending_snapshot = None
+        self._refresh_history_actions()
+
+        self.log_view.clear()
+        self.refresh_channels()
+        self._update_title()
+
+    def _sync_inputs(self, project: Project) -> None:
+        """把工程的 BPM、拍号、网格写回输入框。
+
+        同步时屏蔽信号，避免把「界面刷新」当成「用户改值」再写回工程。
+        """
         self.bpm_input.blockSignals(True)
         self.numerator_input.blockSignals(True)
         self.bpm_input.setValue(project.bpm)
@@ -497,10 +615,6 @@ class MainWindow(QMainWindow):
         self.bpm_input.blockSignals(False)
         self.numerator_input.blockSignals(False)
 
-        self.log_view.clear()
-        self.refresh_channels()
-        self._update_title()
-
     def _update_title(self) -> None:
         name = os.path.basename(self.project_path) if self.project_path else "未命名工程"
         self.setWindowTitle(f"多通道音序器 - {name}")
@@ -511,6 +625,8 @@ class MainWindow(QMainWindow):
         channel = self.piano_roll.channel
         notes = len(channel) if channel is not None else 0
         state = "播放中" if self.engine.is_playing else "已停止"
+        if self.engine.loop_enabled:
+            state += "｜循环"
         self.status_label.setText(
             f"通道数 {len(self.project.channels)}｜当前通道音符 {notes}｜"
             f"工程长度 {self.project.length_in_steps()} 网格｜"

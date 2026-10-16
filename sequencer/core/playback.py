@@ -20,6 +20,10 @@
     QTimer 由界面层持有并调用 step()，因此本模块不依赖 PySide6，
     没有图形环境也能测试。暂停会为正在发声的音符补发 NOTE_OFF，
     恢复播放时再从当前位置重新发 NOTE_ON，避免悬挂音。
+
+循环播放：
+    loop_enabled 为真时，事件放完就回到工程起点重新开始，不停表。
+    循环范围当前固定为整个工程，不做区间循环。
 """
 
 from __future__ import annotations
@@ -141,12 +145,14 @@ class PlaybackEngine:
 
     output 是任一实现了 send(event) 的对象（见 output.base.OutputAdapter）。
     output 为 None 时只产生事件不发出，便于测试和只预览界面。
+    loop_enabled 为真时循环播放整个工程，见模块说明。
     """
 
     def __init__(self, project: Project, output=None, on_event=None) -> None:
         self.project = project
         self.output = output
         self.on_event = on_event
+        self.loop_enabled = False
         self._events: list[NoteEvent] = []
         self._next_index = 0
         self._accumulated = 0.0  # 已播完的秒数（暂停或播完时落账）
@@ -230,26 +236,48 @@ class PlaybackEngine:
         return released
 
     def step(self) -> list[NoteEvent]:
-        """推进到当前时刻，返回本次新产生的事件。"""
+        """推进到当前时刻，返回本次新产生的事件。
+
+        开启循环时，事件放完不停止，而是回到工程起点重新开始放。
+        一次 step() 最多绕回一次，避免没有事件可放时反复绕回造成空转。
+        """
         if not self._playing:
             return []
-        now = self._position_seconds()
         ready: list[NoteEvent] = []
-        while self._next_index < len(self._events):
-            event = self._events[self._next_index]
-            if event.time_seconds > now:
+        wrapped = False
+        while True:
+            now = self._position_seconds()
+            while self._next_index < len(self._events):
+                event = self._events[self._next_index]
+                if event.time_seconds > now:
+                    break
+                ready.append(event.copy())
+                self._next_index += 1
+            if self._next_index < len(self._events):
                 break
-            ready.append(event.copy())
-            self._next_index += 1
+            if not (self.loop_enabled and not wrapped and self._wrap_loop()):
+                # 事件放完就落账并停下，省得界面一直空转。
+                self._accumulated = now
+                self._playing = False
+                self._started_at = None
+                break
+            wrapped = True
         self._dispatch(ready)
-        if self._next_index >= len(self._events):
-            # 事件放完就落账并停下，省得界面一直空转。
-            self._accumulated = now
-            self._playing = False
-            self._started_at = None
         return ready
 
     # ---------- 内部 ----------
+
+    def _wrap_loop(self) -> bool:
+        """回到工程起点重新开始一段播放。没有可放的事件时返回 False。"""
+        events = collect_events(self.project, start_step=0)
+        if not events:
+            return False
+        self._events = events
+        self._next_index = 0
+        self._start_step = 0
+        self._accumulated = 0.0
+        self._started_at = time.monotonic()
+        return True
 
     def _seconds_per_step(self) -> float:
         return step_to_seconds(1, self.project.bpm, self.project.grid_step)
