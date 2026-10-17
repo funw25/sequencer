@@ -580,6 +580,68 @@ def test_scrubbing_shows_a_time_readout(qapp):
     win.close()
 
 
+# ---------- 选中与删除音符 ----------
+
+
+def test_clicking_a_note_selects_it(qapp):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    win = MainWindow()
+    win.resize(1000, 700)
+    win.show()
+    win.project.create_note(0, 31, 4, 4)
+    win.refresh_channels()
+    win.piano_roll.center_on_notes()
+    view = win.piano_roll
+    note = win.project.channels[0].notes[0]
+
+    center = view.mapFromScene(view._note_rect(note).center())
+    QTest.mouseClick(
+        view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center
+    )
+    assert view.selected_note is note
+    win.close()
+
+
+def test_delete_key_removes_the_selected_note_and_undo_restores_it(qapp):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    win = MainWindow()
+    win.resize(1000, 700)
+    win.show()
+    win.project.create_note(0, 31, 4, 4)
+    win.refresh_channels()
+    view = win.piano_roll
+    view._select_note(win.project.channels[0].notes[0])
+    view.setFocus()
+
+    QTest.keyClick(view, Qt.Key.Key_Delete)
+    assert len(win.project.channels[0]) == 0
+    assert view.selected_note is None
+
+    win.undo()
+    assert len(win.project.channels[0]) == 1
+    win.close()
+
+
+def test_delete_without_selection_does_nothing(window):
+    window.project.create_note(0, 60, 0, 4)
+    assert window.piano_roll.delete_selected_note() is False
+    assert len(window.project.channels[0]) == 1
+
+
+def test_selection_clears_when_switching_channel(window):
+    window.project.create_note(0, 60, 0, 4)
+    window.piano_roll.rebuild()
+    window.piano_roll._select_note(window.project.channels[0].notes[0])
+    assert window.piano_roll.selected_note is not None
+
+    window.add_channel()  # 切到新通道，旧通道的音符不该还处于选中态
+    assert window.piano_roll.selected_note is None
+
+
 def test_control_row_widgets_are_wide_enough(qapp):
     """控件宽度不能小于最小需要，否则字会被挤掉（拍号分子曾因此看不见）。"""
     win = MainWindow()

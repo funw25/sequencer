@@ -595,7 +595,8 @@ class MainWindow(QMainWindow):
     def add_channel(self) -> None:
         before = self._snapshot()
         self.project.add_channel()
-        self.channel_list.setCurrentRow(len(self.project.channels) - 1)
+        # 先移动选中下标再重建列表：列表此时还没有新行，setCurrentRow 会落空
+        self.piano_roll.channel_index = len(self.project.channels) - 1
         self.refresh_channels()
         self._record("添加通道", before)
 
@@ -996,6 +997,7 @@ class MainWindow(QMainWindow):
             "  空白处左键拖动：新建音符，横向拖动决定长度，纵向决定音高\n"
             "  音符上拖动：移动位置或改音高\n"
             "  音符右边缘拖动：改长度\n"
+            "  删除音符：先点选它，按 Delete 或退格；或右键音符选「删除音符」\n"
             "  以上操作全部吸附到整数网格\n\n"
             "播放\n"
             "  空格开始播放，工具栏可暂停、停止、循环\n"

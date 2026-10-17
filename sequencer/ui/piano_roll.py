@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QGraphicsSimpleTextItem,
     QGraphicsView,
     QLabel,
+    QMenu,
 )
 
 from ..model.note import MAX_PITCH, Note
@@ -117,6 +118,9 @@ class PianoRollView(QGraphicsView):
         self._drag_end_step = 0  # 拖动中的结束格，纵向辅助线用
         self._ruler_hover = False  # 鼠标是否停在时间轴上，用来提亮整条
         self._playhead_hover = False  # 鼠标是否压在播放头那根线上，用来加粗
+        self._selected_note: Note | None = None  # 当前选中的音符，Delete 键删它
+        # 键盘焦点：不设的话 Delete 键到不了这里
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._readout = QLabel(self.viewport())
         self._readout.setStyleSheet(READOUT_STYLE)
@@ -431,6 +435,9 @@ class PianoRollView(QGraphicsView):
         """让场景里的音符图元与当前通道一致，并重画其他通道的幽灵音符。"""
         channel = self.channel
         wanted = {} if channel is None else {id(note): note for note in channel}
+        # 选中的音符不在当前通道里了（切通道、撤销、删除）就清掉选中
+        if self._selected_note is not None and id(self._selected_note) not in wanted:
+            self._selected_note = None
         for key in list(self._note_items):
             if key not in wanted:
                 self._note_labels.pop(key, None)
@@ -490,7 +497,11 @@ class PianoRollView(QGraphicsView):
             color = color.lighter(135)
         item.setBrush(QBrush(color))
         # 正在拖动的音符用亮边框标出，便于确认操作对象
-        border = NOTE_SELECTED_BORDER if note is self._drag_note else NOTE_BORDER
+        border = (
+            NOTE_SELECTED_BORDER
+            if note is self._drag_note or note is self._selected_note
+            else NOTE_BORDER
+        )
         pen = QPen(QColor(border))
         pen.setCosmetic(True)
         item.setPen(pen)
@@ -548,6 +559,58 @@ class PianoRollView(QGraphicsView):
             return
         self._ruler_hover = hover
         self.viewport().update()
+
+    # ---------- 选中与删除 ----------
+
+    def _select_note(self, note: Note | None) -> None:
+        """选中一个音符，它的边框会变亮；传 None 表示取消选中。"""
+        if note is self._selected_note:
+            return
+        previous = self._selected_note
+        self._selected_note = note
+        for candidate in (previous, note):
+            if candidate is not None:
+                self._update_item(candidate)
+
+    @property
+    def selected_note(self) -> Note | None:
+        return self._selected_note
+
+    def delete_selected_note(self) -> bool:
+        """删除选中的音符，返回是否真的删了。
+
+        通过 editStarted / editFinished 走一次完整的编辑，主窗口据此记进撤销栈。
+        """
+        note = self._selected_note
+        channel = self.channel
+        if note is None or channel is None or note not in channel:
+            return False
+        self.editStarted.emit()
+        channel.remove_note(note)
+        self._selected_note = None
+        self._sync_notes()
+        self.viewport().update()
+        self.notesChanged.emit()
+        self.editFinished.emit()
+        return True
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            if self.delete_selected_note():
+                return
+        super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        """右键音符：删除它。空白处不弹菜单。"""
+        pos = self.mapToScene(event.pos())
+        note = self._note_at(pos)
+        if note is None:
+            event.ignore()
+            return
+        self._select_note(note)
+        menu = QMenu(self)
+        menu.addAction("删除音符", self.delete_selected_note)
+        menu.exec(event.globalPos())
 
     # ---------- 拖动读数 ----------
 
@@ -632,6 +695,7 @@ class PianoRollView(QGraphicsView):
             self._sync_notes()  # 为新音符补上图元
             self._mode = "create"
             self._drag_note = note
+        self._select_note(note)
         self._remember_drag_target(note)
         self._show_readout(note, event.position().toPoint())
         self.viewport().update()
