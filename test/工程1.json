@@ -1,0 +1,101 @@
+{
+  "format_version": 1,
+  "bpm": 120.0,
+  "time_signature_numerator": 4,
+  "time_signature_denominator": 4,
+  "grid_step": 4,
+  "channels": [
+    {
+      "index": 0,
+      "name": "通道 0",
+      "color": "#4C8BF5",
+      "notes": [
+        {
+          "pitch": 43,
+          "start": 7,
+          "duration": 1
+        },
+        {
+          "pitch": 41,
+          "start": 7,
+          "duration": 7
+        },
+        {
+          "pitch": 18,
+          "start": 9,
+          "duration": 8
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "name": "通道 1",
+      "color": "#E8663D",
+      "notes": [
+        {
+          "pitch": 40,
+          "start": 7,
+          "duration": 6
+        },
+        {
+          "pitch": 30,
+          "start": 7,
+          "duration": 7
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "name": "通道 2",
+      "color": "#2FA84F",
+      "notes": []
+    },
+    {
+      "index": 3,
+      "name": "通道 3",
+      "color": "#B45BD6",
+      "notes": []
+    },
+    {
+      "index": 4,
+      "name": "通道 4",
+      "color": "#D6A32F",
+      "notes": []
+    },
+    {
+      "index": 5,
+      "name": "通道 5",
+      "color": "#3DBFBF",
+      "notes": []
+    },
+    {
+      "index": 6,
+      "name": "通道 6",
+      "color": "#D6508C",
+      "notes": [
+        {
+          "pitch": 35,
+          "start": 10,
+          "duration": 9
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "name": "通道 7",
+      "color": "#7A8B99",
+      "notes": [
+        {
+          "pitch": 37,
+          "start": 7,
+          "duration": 11
+        },
+        {
+          "pitch": 31,
+          "start": 7,
+          "duration": 7
+        }
+      ]
+    }
+  ]
+}
