@@ -75,8 +75,9 @@ def test_creating_note_adds_scene_item(window):
 
 def test_coordinate_helpers_are_consistent(window):
     view = window.piano_roll
-    for pitch in (0, 1, 30, 62, 63):
+    for pitch in (1, 2, 30, 62, 63):
         assert view._y_to_pitch(view._pitch_to_y(pitch)) == pitch
+    assert view._y_to_pitch(view._pitch_to_y(0)) == 1  # 0 号是休止，卷帘最底一行是 C2
     assert view._pitch_to_y(63) == pytest.approx(RULER_HEIGHT_PX)
     assert view._pitch_to_y(62) - view._pitch_to_y(63) == pytest.approx(NOTE_HEIGHT_PX)
     assert view._x_to_step(0.0) == 0
@@ -477,9 +478,9 @@ def test_time_label_follows_the_engine(window):
 
 
 def test_cursor_readout_shows_pitch_bar_and_seconds(window):
-    window.piano_roll.cursorMoved.emit(60, 16)
+    window.piano_roll.cursorMoved.emit(61, 16)
     text = window.position_label.text()
-    assert "C5" in text
+    assert "C7" in text
     assert "小节 2.1" in text
     assert "第 16 格" in text
 

@@ -38,6 +38,7 @@ from ..output.debug_output import pitch_name
 
 STEP_WIDTH_PX = 24.0  # 一个网格的宽度
 NOTE_HEIGHT_PX = 14.0  # 一个音高行的高度
+LOWEST_PITCH = 1  # 卷帘最底一行。音高表里第 1 号是 C2（65Hz），0 号是休止，不上卷帘
 RULER_HEIGHT_PX = 36.0  # 顶部时间轴高度：两排文字，同时是拖动播放头的可点区域
 RESIZE_EDGE_PX = 6.0  # 距右边缘多少像素内算「拖长度」
 MIN_VISIBLE_STEPS = 64  # 内容不足时的最小可见网格数
@@ -74,8 +75,23 @@ READOUT_STYLE = (
     " border-radius: 3px; font-size: 11px; }"
 )
 
-#: 一个八度内黑键相对 C 的偏移。
+#: 一个八度内黑键相对于 Cn 的偏移。Cn 落在音高 1、13、25…（见 LOWEST_PITCH）。
 _BLACK_KEY_OFFSETS = (1, 3, 6, 8, 10)
+
+
+def _degree(pitch: int) -> int:
+    """音高在八度内的位置，0 表示这一行的音名是 Cn。"""
+    return (pitch - LOWEST_PITCH) % 12
+
+
+def _rows() -> int:
+    """卷帘一共有多少行音高：C2 到最高音。"""
+    return MAX_PITCH - LOWEST_PITCH + 1
+
+
+def _octave(pitch: int) -> int:
+    """音高所在的八度数：C2 在第 2 个八度，与音高表一致。"""
+    return (pitch - LOWEST_PITCH) // 12 + 2
 
 
 class PianoRollView(QGraphicsView):
@@ -168,7 +184,7 @@ class PianoRollView(QGraphicsView):
 
         label_font = painter.font()
         label_font.setPointSize(7)
-        for pitch in range(MAX_PITCH + 1):
+        for pitch in range(LOWEST_PITCH, MAX_PITCH + 1):
             y = self._pitch_to_y(pitch)
             if y + NOTE_HEIGHT_PX < 0 or y > view_height:
                 continue
@@ -178,7 +194,7 @@ class PianoRollView(QGraphicsView):
                 QRectF(0.0, y, KEYBOARD_WIDTH_PX, NOTE_HEIGHT_PX),
                 QColor(KEYBOARD_WHITE),
             )
-            if pitch % 12 in _BLACK_KEY_OFFSETS:
+            if _degree(pitch) in _BLACK_KEY_OFFSETS:
                 # 黑键短，靠键盘右侧，贴近真实键盘的排列
                 painter.fillRect(
                     QRectF(
@@ -191,8 +207,8 @@ class PianoRollView(QGraphicsView):
                 )
             painter.setPen(QPen(QColor(KEYBOARD_LINE), 0))
             painter.drawLine(0.0, y, KEYBOARD_WIDTH_PX, y)
-            # 每个八度起始画一条分隔线，并标注音名，便于定位
-            if pitch % 12 == 0:
+            # 每个八度起始（Cn 那一行）画一条分隔线并标注音名，其余行不写字
+            if _degree(pitch) == 0:
                 painter.setPen(QPen(QColor(KEYBOARD_OCTAVE), 1))
                 painter.drawLine(0.0, y, KEYBOARD_WIDTH_PX, y)
                 painter.setPen(QPen(QColor(KEYBOARD_TEXT), 0))
@@ -200,7 +216,7 @@ class PianoRollView(QGraphicsView):
                 painter.drawText(
                     QRectF(4.0, y, KEYBOARD_WIDTH_PX - 6.0, NOTE_HEIGHT_PX),
                     int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                    f"C{pitch // 12}",
+                    f"C{_octave(pitch)}",
                 )
 
         painter.setPen(QPen(QColor(KEYBOARD_LINE), 1))
@@ -351,7 +367,7 @@ class PianoRollView(QGraphicsView):
         self._scene.setSceneRect(self._scene_rect())
 
     def _scene_rect(self) -> QRectF:
-        height = RULER_HEIGHT_PX + (MAX_PITCH + 1) * NOTE_HEIGHT_PX
+        height = RULER_HEIGHT_PX + _rows() * NOTE_HEIGHT_PX
         return QRectF(0.0, 0.0, self._max_steps * STEP_WIDTH_PX, height)
 
     def _draw_grid(self) -> None:
@@ -360,7 +376,7 @@ class PianoRollView(QGraphicsView):
         时间轴不在这里画：它固定在视口顶部，见 _draw_ruler()。
         """
         width = self._max_steps * STEP_WIDTH_PX
-        height = RULER_HEIGHT_PX + (MAX_PITCH + 1) * NOTE_HEIGHT_PX
+        height = RULER_HEIGHT_PX + _rows() * NOTE_HEIGHT_PX
 
         grid_step = self.project.grid_step
         # 一小节的网格数。拍号分子为每小节的拍数，分母目前不参与换算。
@@ -390,16 +406,16 @@ class PianoRollView(QGraphicsView):
         row_pen.setCosmetic(True)
         octave_pen = QPen(QColor(OCTAVE_LINE))
         octave_pen.setCosmetic(True)
-        for pitch in range(MAX_PITCH + 1):
+        for pitch in range(LOWEST_PITCH, MAX_PITCH + 1):
             y = self._pitch_to_y(pitch)
             # 黑键行用更暗的底色，便于在深色网格里辨认音高位置
-            if pitch % 12 in _BLACK_KEY_OFFSETS:
+            if _degree(pitch) in _BLACK_KEY_OFFSETS:
                 band = QGraphicsRectItem(QRectF(0.0, y, width, NOTE_HEIGHT_PX))
                 band.setBrush(QBrush(QColor(ROW_BLACK)))
                 band.setPen(QPen(Qt.PenStyle.NoPen))
                 band.setZValue(-1.5)
                 self._scene.addItem(band)
-            if pitch % 12 != 0:
+            if _degree(pitch) != 0:
                 line = self._scene.addLine(0.0, y, width, y, row_pen)
                 line.setZValue(-1)
             # 八度起始处画一条略亮的横线，音名由左侧键盘列标示
@@ -529,9 +545,9 @@ class PianoRollView(QGraphicsView):
 
     @staticmethod
     def _y_to_pitch(y: float) -> int:
-        """场景 y -> 音高，并夹到 0..MAX_PITCH。"""
+        """场景 y -> 音高，并夹到 LOWEST_PITCH..MAX_PITCH。"""
         pitch = MAX_PITCH - int((y - RULER_HEIGHT_PX) // NOTE_HEIGHT_PX)
-        return max(0, min(MAX_PITCH, pitch))
+        return max(LOWEST_PITCH, min(MAX_PITCH, pitch))
 
     @staticmethod
     def _x_to_step(x: float) -> int:

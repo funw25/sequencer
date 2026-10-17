@@ -13,13 +13,16 @@ _NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 
 def pitch_name(pitch: int) -> str:
-    """把音高编号转成便于核对的音名（仅显示用，硬件映射另定）。"""
+    """把音高编号转成便于核对的音名（仅显示用，硬件映射另定）。
+
+    与音高表一致：1 号音是 C2（65Hz），每 12 个音高升一个八度。
+    """
     if pitch <= 0:
         return "休止"
     if pitch > 127:
         return "?"
-    octave, index = divmod(pitch, 12)
-    return f"{_NOTE_NAMES[index]}{octave}"
+    octave, index = divmod(pitch - 1, 12)
+    return f"{_NOTE_NAMES[index]}{octave + 2}"
 
 
 class DebugOutput(OutputAdapter):
